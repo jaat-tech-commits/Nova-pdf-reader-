@@ -70,12 +70,23 @@ class MainActivity : ComponentActivity() {
             val navController = rememberNavController()
 
             fun navigateToMainTab(route: String) {
-                navController.navigate(route) {
-                    popUpTo(navController.graph.findStartDestination().id) {
-                        saveState = true
+                if (route == NavRoutes.HOME) {
+                    // Home is the root of the signed-in app experience. Always return
+                    // to the existing Home entry instead of stacking another Home screen.
+                    val returned = navController.popBackStack(NavRoutes.HOME, false)
+                    if (!returned && navController.currentDestination?.route != NavRoutes.HOME) {
+                        navController.navigate(NavRoutes.HOME) {
+                            launchSingleTop = true
+                        }
                     }
-                    launchSingleTop = true
-                    restoreState = true
+                } else {
+                    navController.navigate(route) {
+                        popUpTo(NavRoutes.HOME) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             }
             val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -83,6 +94,7 @@ class MainActivity : ComponentActivity() {
 
             // Initialize sample documents once on first start
             LaunchedEffect(Unit) {
+                repository.removeBundledSampleDocuments()
                 repository.initializeDefaultDocumentsIfEmpty()
                 if (intentPdfUri != null) {
                     val imported = repository.importDocument(intentPdfUri, "Opened_Document.pdf")
