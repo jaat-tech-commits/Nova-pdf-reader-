@@ -114,24 +114,27 @@ fun StudyModeScreen(
                     }
                     IconButton(onClick = {
                         coroutineScope.launch {
-                            // Add extra generated question
-                            repository.addQuiz(
-                                StudyQuizEntity(
-                                    documentId = docId,
-                                    question = "What is the primary factor limiting response to selection in closed populations?",
-                                    optionA = "Loss of genetic variance (inbreeding)",
-                                    optionB = "Excess environmental noise",
-                                    optionC = "Random mutations",
-                                    optionD = "Fixed epistatic interactions",
-                                    correctOptionIndex = 0,
-                                    explanation = "In closed breeding programs, selection reduces additive genetic variance over time, eventually plateauing selection response.",
-                                    pageReference = 2
-                                )
-                            )
-                            Toast.makeText(context, "New practice question generated!", Toast.LENGTH_SHORT).show()
+                            currentQuizIndex = 0
+                            currentCardIndex = 0
+                            selectedOptionIndex = null
+                            isSubmitted = false
+                            score = 0
+                            isQuizCompleted = false
+                            examNotes = ""
+                            formulas = ""
+                            studyGenerationMessage = repository.regenerateStudyPack(docId)
+                            Toast.makeText(
+                                context,
+                                "Study content regenerated from this PDF.",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = "Generate More", tint = MaterialTheme.colorScheme.primary)
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = "Regenerate from PDF",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             )
