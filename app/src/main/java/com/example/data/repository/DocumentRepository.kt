@@ -228,6 +228,112 @@ class DocumentRepository(
         studyQuizDao.insertQuiz(quiz)
     }
 
+    suspend fun generateStudyPackIfNeeded(docId: Long): String? = withContext(Dispatchers.IO) {
+        val doc = docDao.getDocumentById(docId) ?: return@withContext "Document not found."
+        val existingQuizzes = studyQuizDao.getQuizzesForDocument(docId).firstOrNull().orEmpty()
+        val existingCards = flashcardDao.getFlashcardsForDocument(docId).firstOrNull().orEmpty()
+        if (existingQuizzes.isNotEmpty() && existingCards.isNotEmpty()) return@withContext null
+
+        val sourceText = doc.extractedText.orEmpty()
+        if (sourceText.length < 80 || sourceText.startsWith("Imported PDF:")) {
+            return@withContext "This PDF has no selectable text. It may be scanned/image-only. Use the OCR/AI tools on the PDF pages first, then regenerate Study Mode."
+        }
+
+        val prompt = """
+            Create a study pack ONLY from the document content below.
+            Do not use any unrelated example, demo, or memorized sample content.
+            Return ONLY valid JSON:
+            {
+              "quizzes": [
+                {
+                  "question": "question",
+                  "optionA": "option",
+                  "optionB": "option",
+                  "optionC": "option",
+                  "optionD": "option",
+                  "correctOptionIndex": 0,
+                  "explanation": "short explanation",
+                  "pageReference": 1
+                }
+              ],
+              "flashcards": [
+                {
+                  "front": "question or term",
+                  "back": "answer",
+                  "pageReference": 1
+                }
+              ]
+            }
+            Generate 6 high-quality MCQs and 6 useful flashcards.
+            Use only facts actually present in the document. Keep pageReference tied to [Page N] markers.
+            
+            DOCUMENT:
+            ${sourceText.take(15000)}
+        """.trimIndent()
+
+        val raw = geminiService.askDocument(
+            question = prompt,
+            documentTitle = doc.title,
+            documentText = sourceText
+        ).trim()
+
+        if (raw.startsWith("Gemini ")) return@withContext raw
+
+        try {
+            val clean = raw.replaceAll(String.fromCharCode(96), "").trim()
+            val root = org.json.JSONObject(clean)
+
+            if (existingQuizzes.isEmpty()) {
+                studyQuizDao.clearQuizzesForDocument(docId)
+                val quizzes = root.optJSONArray("quizzes")
+                if (quizzes != null) {
+                    for (i in 0 until quizzes.length()) {
+                        val q = quizzes.optJSONObject(i) ?: continue
+                        val correct = q.optInt("correctOptionIndex", -1)
+                        if (correct !in 0..3) continue
+                        studyQuizDao.insertQuiz(
+                            StudyQuizEntity(
+                                documentId = docId,
+                                question = q.optString("question").trim(),
+                                optionA = q.optString("optionA").trim(),
+                                optionB = q.optString("optionB").trim(),
+                                optionC = q.optString("optionC").trim(),
+                                optionD = q.optString("optionD").trim(),
+                                correctOptionIndex = correct,
+                                explanation = q.optString("explanation").trim(),
+                                pageReference = q.optInt("pageReference", 1).coerceIn(1, doc.pageCount)
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (existingCards.isEmpty()) {
+                flashcardDao.clearFlashcardsForDocument(docId)
+                val cards = root.optJSONArray("flashcards")
+                if (cards != null) {
+                    for (i in 0 until cards.length()) {
+                        val card = cards.optJSONObject(i) ?: continue
+                        val front = card.optString("front").trim()
+                        val back = card.optString("back").trim()
+                        if (front.isBlank() || back.isBlank()) continue
+                        flashcardDao.insertFlashcard(
+                            FlashcardEntity(
+                                documentId = docId,
+                                front = front,
+                                back = back,
+                                isKnown = false
+                            )
+                        )
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            "Study content could not be generated from this PDF. Please try again."
+        }
+    }
+
     suspend fun addFolder(name: String): Long = withContext(Dispatchers.IO) {
         folderDao.insertFolder(FolderEntity(name = name))
     }
