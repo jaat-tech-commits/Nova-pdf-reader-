@@ -1,5 +1,6 @@
 package com.example.data.service
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.util.Base64
 import com.example.BuildConfig
@@ -14,7 +15,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
-class GeminiService {
+class GeminiService(private val context: Context) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -23,15 +24,25 @@ class GeminiService {
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val modelName = "gemini-3.5-flash"
+    private val prefs by lazy { context.getSharedPreferences("nova_pdf_prefs", Context.MODE_PRIVATE) }
+
+    // Current stable Gemini model; the user can change this from Settings.
+    private val modelName: String
+        get() = prefs.getString("gemini_model", "gemini-3.8-flash") ?: "gemini-3.8-flash"
 
     private fun getApiKey(): String {
+        val saved = prefs.getString("gemini_api_key", "").orEmpty().trim()
+        if (saved.isNotBlank()) return saved
+
         return try {
-            BuildConfig.GEMINI_API_KEY
-        } catch (e: Exception) {
+            BuildConfig.GEMINI_API_KEY.trim()
+        } catch (_: Exception) {
             ""
         }
     }
+
+    private fun geminiNotConfigured(): String =
+        "Gemini AI is not configured. Open Settings → NOVA AI Engine → Gemini API Key, enter your Google AI Studio API key, then try again."
 
     suspend fun askDocument(
         question: String,
@@ -42,7 +53,7 @@ class GeminiService {
     ): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext generateOfflineAnswer(question, documentTitle, documentText, pageContext)
+            return@withContext geminiNotConfigured()
         }
 
         val systemPrompt = """
@@ -127,7 +138,7 @@ class GeminiService {
             val responseBody = response.body?.string().orEmpty()
 
             if (!response.isSuccessful) {
-                return@withContext generateOfflineAnswer(question, documentTitle, documentText, pageContext)
+                return@withContext "Gemini request failed (${response.code}). Please check the API key, selected model, internet connection, and Gemini API access."
             }
 
             val parsed = JSONObject(responseBody)
@@ -136,9 +147,9 @@ class GeminiService {
             val parts = candidate?.optJSONObject("content")?.optJSONArray("parts")
             val answer = parts?.optJSONObject(0)?.optString("text").orEmpty()
 
-            if (answer.isNotBlank()) answer else generateOfflineAnswer(question, documentTitle, documentText, pageContext)
+            if (answer.isNotBlank()) answer else "Gemini returned an empty response. Please try again."
         } catch (e: Exception) {
-            generateOfflineAnswer(question, documentTitle, documentText, pageContext)
+            "Gemini connection error: ${e.message ?: "unknown error"}. Check your internet connection and API key."
         }
     }
 
@@ -175,7 +186,7 @@ class GeminiService {
         }
 
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext getOfflineExplanation(selectedText, style)
+            return@withContext geminiNotConfigured()
         }
 
         try {
@@ -204,9 +215,9 @@ class GeminiService {
                 ?.optJSONObject("content")?.optJSONArray("parts")
                 ?.optJSONObject(0)?.optString("text").orEmpty()
 
-            if (answer.isNotBlank()) answer else getOfflineExplanation(selectedText, style)
+            if (answer.isNotBlank()) answer else "Gemini returned an empty response. Please try again."
         } catch (e: Exception) {
-            getOfflineExplanation(selectedText, style)
+            "Gemini connection error: ${e.message ?: "unknown error"}."
         }
     }
 
