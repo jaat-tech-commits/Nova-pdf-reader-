@@ -334,6 +334,12 @@ class DocumentRepository(
         }
     }
 
+    suspend fun regenerateStudyPack(docId: Long): String? = withContext(Dispatchers.IO) {
+        flashcardDao.clearFlashcardsForDocument(docId)
+        studyQuizDao.clearQuizzesForDocument(docId)
+        generateStudyPackIfNeeded(docId)
+    }
+
     suspend fun addFolder(name: String): Long = withContext(Dispatchers.IO) {
         folderDao.insertFolder(FolderEntity(name = name))
     }
