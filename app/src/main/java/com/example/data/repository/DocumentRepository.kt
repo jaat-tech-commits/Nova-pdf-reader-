@@ -11,6 +11,7 @@ import com.example.data.local.FlashcardEntity
 import com.example.data.local.FolderEntity
 import com.example.data.local.StudyQuizEntity
 import com.example.data.service.GeminiService
+import com.example.data.service.OcrService
 import com.example.data.service.PdfRendererService
 import com.example.data.service.PdfToolService
 import com.example.data.service.PdfTextExtractorService
@@ -28,6 +29,7 @@ class DocumentRepository(
     val pdfToolService = PdfToolService(context)
     val pdfTextExtractorService = PdfTextExtractorService(context)
     val geminiService = GeminiService(context)
+    val ocrService = OcrService(context)
 
     private val docDao = database.documentDao()
     private val bookmarkDao = database.bookmarkDao()
@@ -102,6 +104,66 @@ class DocumentRepository(
         val updated = doc.copy(id = id, thumbnailPath = thumbPath)
         docDao.updateDocument(updated)
         updated
+    }
+
+    /**
+     * OCR the requested page. This is the fallback for scanned/image-only PDFs
+     * where PDFBox cannot extract a selectable text layer.
+     */
+    suspend fun ocrPage(docId: Long, pageNumber: Int): String? = withContext(Dispatchers.IO) {
+        val doc = docDao.getDocumentById(docId) ?: return@withContext null
+        val pageIndex = (pageNumber - 1).coerceIn(0, doc.pageCount.coerceAtLeast(1) - 1)
+        val bitmap = pdfRendererService.renderPage(
+            filePath = doc.filePath,
+            pageIndex = pageIndex,
+            destWidth = 1800,
+            backgroundColor = android.graphics.Color.WHITE
+        ) ?: return@withContext null
+        ocrService.recognize(bitmap).trim().ifBlank { null }
+    }
+
+    /**
+     * OCR all pages only when the document does not already have real extracted text.
+     * The result is stored in the existing extractedText field with [Page N] markers,
+     * so Study Mode, search and AI can use the same source of truth.
+     */
+    suspend fun ensureOcrTextIfNeeded(docId: Long): Boolean = withContext(Dispatchers.IO) {
+        val doc = docDao.getDocumentById(docId) ?: return@withContext false
+        val existing = doc.extractedText.orEmpty().trim()
+        if (existing.length >= 80 && !existing.startsWith("Imported PDF:")) {
+            return@withContext true
+        }
+
+        val pages = doc.pageCount.coerceAtLeast(1)
+        val output = StringBuilder()
+
+        for (page in 1..pages) {
+            val bitmap = pdfRendererService.renderPage(
+                filePath = doc.filePath,
+                pageIndex = page - 1,
+                destWidth = 1800,
+                backgroundColor = android.graphics.Color.WHITE
+            ) ?: continue
+
+            val pageText = try {
+                ocrService.recognize(bitmap).trim()
+            } catch (_: Exception) {
+                ""
+            }
+
+            if (pageText.isNotBlank()) {
+                output.append("[Page ").append(page).append("]\n")
+                output.append(pageText).append("\n\n")
+            }
+        }
+
+        val text = output.toString().trim()
+        if (text.length >= 20) {
+            docDao.updateExtractedText(docId, text)
+            true
+        } else {
+            false
+        }
     }
 
     suspend fun updateReadingProgress(docId: Long, page: Int) = withContext(Dispatchers.IO) {
