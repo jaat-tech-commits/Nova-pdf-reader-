@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.Base64
 import com.example.BuildConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -128,26 +129,75 @@ class GeminiService(private val context: Context) {
                 })
             }
 
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-            val request = Request.Builder()
-                .url(url)
-                .post(requestJson.toString().toRequestBody(jsonMediaType))
-                .build()
+            // Gemini can temporarily return 503 when a model is overloaded. Retry with
+            // exponential backoff, then automatically cascade through stable Flash models.
+            // A 401/403/400/404 is not retried because those indicate configuration/request
+            // problems rather than transient service availability.
+            val fallbackModels = listOf(
+                modelName,
+                "gemini-3.7-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash-lite"
+            ).distinct()
 
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string().orEmpty()
+            var lastErrorCode = 0
+            var lastErrorMessage = ""
 
-            if (!response.isSuccessful) {
-                return@withContext "Gemini request failed (${response.code}). Please check the API key, selected model, internet connection, and Gemini API access."
+            for ((modelIndex, model) in fallbackModels.withIndex()) {
+                val maxAttempts = if (modelIndex == 0) 3 else 2
+
+                for (attempt in 1..maxAttempts) {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestJson.toString().toRequestBody(jsonMediaType))
+                        .build()
+
+                    val response = client.newCall(request).execute()
+                    val responseBody = response.body?.string().orEmpty()
+
+                    if (response.isSuccessful) {
+                        val parsed = JSONObject(responseBody)
+                        val candidates = parsed.optJSONArray("candidates")
+                        val candidate = candidates?.optJSONObject(0)
+                        val parts = candidate?.optJSONObject("content")?.optJSONArray("parts")
+                        val answer = parts?.optJSONObject(0)?.optString("text").orEmpty()
+
+                        if (answer.isNotBlank()) {
+                            return@withContext answer
+                        }
+
+                        lastErrorCode = 200
+                        lastErrorMessage = "Gemini returned an empty response."
+                        break
+                    }
+
+                    lastErrorCode = response.code
+                    lastErrorMessage = responseBody
+
+                    // Only transient service/rate-limit/server errors are retried.
+                    val retryable = response.code == 429 || response.code == 500 ||
+                        response.code == 503 || response.code == 504
+
+                    if (!retryable) {
+                        return@withContext "Gemini request failed (${response.code}). Please check the API key, selected model, and Gemini API access."
+                    }
+
+                    if (attempt < maxAttempts) {
+                        // 1s, then 2s; small jitter avoids synchronized retries.
+                        val backoffMs = 1000L shl (attempt - 1)
+                        val jitterMs = kotlin.random.Random.nextLong(0L, 350L)
+                        delay(backoffMs + jitterMs)
+                    }
+                }
             }
 
-            val parsed = JSONObject(responseBody)
-            val candidates = parsed.optJSONArray("candidates")
-            val candidate = candidates?.optJSONObject(0)
-            val parts = candidate?.optJSONObject("content")?.optJSONArray("parts")
-            val answer = parts?.optJSONObject(0)?.optString("text").orEmpty()
-
-            if (answer.isNotBlank()) answer else "Gemini returned an empty response. Please try again."
+            return@withContext when (lastErrorCode) {
+                429 -> "Gemini is temporarily rate-limited. Please wait a moment and try again."
+                503 -> "Gemini is temporarily unavailable. NOVA tried multiple Flash models automatically; please try again shortly."
+                500, 504 -> "Gemini is temporarily having server issues. NOVA retried automatically; please try again shortly."
+                else -> "Gemini request failed ($lastErrorCode). ${lastErrorMessage.ifBlank { "Please try again." }}"
+            }
         } catch (e: Exception) {
             "Gemini connection error: ${e.message ?: "unknown error"}. Check your internet connection and API key."
         }
