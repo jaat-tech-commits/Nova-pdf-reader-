@@ -14,31 +14,39 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.example.BuildConfig
-import com.example.data.repository.DocumentRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     currentTheme: String,
     onThemeChange: (String) -> Unit,
+    currentAiModel: String,
+    onAiModelChange: (String) -> Unit,
+    apiKeyConfigured: Boolean,
+    onApiKeyChange: (String) -> Unit,
     onNavigateToVault: () -> Unit
 ) {
     val context = LocalContext.current
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showModelDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
     var rememberReadingPosition by remember { mutableStateOf(true) }
     var enableContinuousScroll by remember { mutableStateOf(false) }
     var showPageCitations by remember { mutableStateOf(true) }
     var cacheSizeMb by remember { mutableStateOf("12.4 MB") }
 
-    val hasApiKey = remember {
-        try {
-            BuildConfig.GEMINI_API_KEY.isNotBlank() && BuildConfig.GEMINI_API_KEY != "MY_GEMINI_API_KEY"
-        } catch (_: Exception) {
-            false
-        }
-    }
+    val models = listOf(
+        "gemini-3.8-flash" to "Gemini 3.8 Flash • Recommended • Fast",
+        "gemini-3.7-flash" to "Gemini 3.7 Flash • Strong reasoning",
+        "gemini-3.6-flash" to "Gemini 3.6 Flash • Balanced",
+        "gemini-3.5-flash" to "Gemini 3.5 Flash • Legacy Flash",
+        "gemini-3.5-flash-lite" to "Gemini 3.5 Flash-Lite • Fast & economical",
+        "gemini-2.5-flash" to "Gemini 2.5 Flash • Reasoning",
+        "gemini-2.5-pro" to "Gemini 2.5 Pro • Advanced reasoning"
+    )
+    val selectedModelLabel = models.firstOrNull { it.first == currentAiModel }?.second ?: currentAiModel
 
     Scaffold(
         topBar = {
@@ -54,7 +62,6 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Appearance Section
             item {
                 SettingsSectionHeader("Appearance")
                 SettingsRow(
@@ -65,7 +72,6 @@ fun SettingsScreen(
                 )
             }
 
-            // Reader Configuration Section
             item {
                 SettingsSectionHeader("Reader Configuration")
                 SettingsSwitchRow(
@@ -84,20 +90,19 @@ fun SettingsScreen(
                 )
             }
 
-            // AI Intelligence Section
             item {
                 SettingsSectionHeader("NOVA AI Engine")
                 SettingsRow(
                     icon = Icons.Default.Psychology,
                     title = "AI Model",
-                    subtitle = "gemini-3.5-flash (Fast, Low Latency, Deep Reasoning)",
-                    onClick = {}
+                    subtitle = selectedModelLabel,
+                    onClick = { showModelDialog = true }
                 )
                 SettingsRow(
                     icon = Icons.Default.Key,
                     title = "Gemini API Key",
-                    subtitle = if (hasApiKey) "Active & Configured via Secrets Panel" else "Configured via AI Studio Secrets (.env)",
-                    onClick = {}
+                    subtitle = if (apiKeyConfigured) "Configured • Gemini AI is ready" else "Not configured • Tap to add your Google AI Studio key",
+                    onClick = { showApiKeyDialog = true }
                 )
                 SettingsSwitchRow(
                     icon = Icons.Default.FormatQuote,
@@ -108,7 +113,6 @@ fun SettingsScreen(
                 )
             }
 
-            // Privacy & Vault
             item {
                 SettingsSectionHeader("Privacy & Security")
                 SettingsRow(
@@ -119,7 +123,6 @@ fun SettingsScreen(
                 )
             }
 
-            // Storage Section
             item {
                 SettingsSectionHeader("Storage & Cache")
                 SettingsRow(
@@ -136,13 +139,12 @@ fun SettingsScreen(
                 )
             }
 
-            // About Section
             item {
                 SettingsSectionHeader("About NOVA PDF AI")
                 SettingsRow(
                     icon = Icons.Default.Info,
                     title = "Version",
-                    subtitle = "NOVA PDF AI 1.0.0 (Build 2026)",
+                    subtitle = "NOVA PDF AI 1.1.0",
                     onClick = {}
                 )
                 Card(
@@ -151,10 +153,10 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("NOVA PDF AI", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text("\"Read. Understand. Create.\"", style = MaterialTheme.typography.bodySmall)
+                        Text(""Read. Understand. Create."", style = MaterialTheme.typography.bodySmall)
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "A modern, offline-resilient PDF reader combined with multimodal Gemini document intelligence, rich annotations, and a comprehensive utility suite.",
+                            "Gemini-powered PDF chat and summaries, document navigation, study tools, annotations, voice input and private storage.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -162,9 +164,7 @@ fun SettingsScreen(
                 }
             }
 
-            item {
-                Spacer(modifier = Modifier.height(30.dp))
-            }
+            item { Spacer(modifier = Modifier.height(30.dp)) }
         }
     }
 
@@ -175,32 +175,124 @@ fun SettingsScreen(
             title = { Text("Choose App Theme") },
             text = {
                 Column {
-                    for (t in themes) {
+                    themes.forEach { theme ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    onThemeChange(t)
+                                    onThemeChange(theme)
                                     showThemeDialog = false
                                 }
                                 .padding(vertical = 12.dp)
                         ) {
                             RadioButton(
-                                selected = currentTheme == t,
+                                selected = currentTheme == theme,
                                 onClick = {
-                                    onThemeChange(t)
+                                    onThemeChange(theme)
                                     showThemeDialog = false
                                 }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(t, style = MaterialTheme.typography.bodyLarge)
+                            Text(theme, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showThemeDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showModelDialog) {
+        AlertDialog(
+            onDismissRequest = { showModelDialog = false },
+            title = { Text("Choose Gemini Model") },
+            text = {
+                Column {
+                    models.forEach { (id, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onAiModelChange(id)
+                                    showModelDialog = false
+                                }
+                                .padding(vertical = 10.dp)
+                        ) {
+                            RadioButton(
+                                selected = currentAiModel == id,
+                                onClick = {
+                                    onAiModelChange(id)
+                                    showModelDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showModelDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (showApiKeyDialog) {
+        var keyInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showApiKeyDialog = false },
+            title = { Text("Gemini API Key") },
+            text = {
+                Column {
+                    Text(
+                        "Create a Gemini API key in Google AI Studio and paste it here. The key is stored locally on this device.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = keyInput,
+                        onValueChange = { keyInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("API key") },
+                        placeholder = { Text("AIza...") },
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    if (apiKeyConfigured) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "A key is already configured. Enter a new key to replace it, or clear it below.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    onApiKeyChange("")
+                    showApiKeyDialog = false
+                    Toast.makeText(context, "Gemini API key cleared", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("Clear")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = keyInput.trim().isNotBlank(),
+                    onClick = {
+                        onApiKeyChange(keyInput.trim())
+                        showApiKeyDialog = false
+                        Toast.makeText(context, "Gemini API key saved", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Save")
+                }
             }
         )
     }
