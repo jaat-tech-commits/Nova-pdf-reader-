@@ -13,6 +13,7 @@ import com.example.data.local.StudyQuizEntity
 import com.example.data.service.GeminiService
 import com.example.data.service.PdfRendererService
 import com.example.data.service.PdfToolService
+import com.example.data.service.PdfTextExtractorService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -25,6 +26,7 @@ class DocumentRepository(
 ) {
     val pdfRendererService = PdfRendererService(context)
     val pdfToolService = PdfToolService(context)
+    val pdfTextExtractorService = PdfTextExtractorService(context)
     val geminiService = GeminiService(context)
 
     private val docDao = database.documentDao()
@@ -42,121 +44,25 @@ class DocumentRepository(
     val folders: Flow<List<FolderEntity>> = folderDao.getAllFolders()
 
     suspend fun initializeDefaultDocumentsIfEmpty() = withContext(Dispatchers.IO) {
-        val existing = docDao.getAllNonVaultDocuments().firstOrNull()
-        if (!existing.isNullOrEmpty()) return@withContext
+        // Production builds start with an empty library. User documents are the source
+        // of truth; NOVA never injects demo PDFs, demo quizzes or demo flashcards.
+    }
 
-        // 1. Generate Welcome Sample PDF
-        val welcomeFile = PdfSampleGenerator.generateWelcomeSamplePdf(context)
-        val welcomeDocId = docDao.insertDocument(
-            DocumentEntity(
-                title = "Welcome to NOVA PDF AI",
-                filePath = welcomeFile.absolutePath,
-                fileSize = welcomeFile.length(),
-                pageCount = 3,
-                lastPageRead = 1,
-                isFavorite = true,
-                folderName = "Getting Started",
-                extractedText = "Welcome to NOVA PDF AI. Read. Understand. Create. In-depth AI Analysis, Clickable Page Citations, Full Annotation Suite, Voice Read Aloud, Interactive Study Mode, PDF Utilities. Privacy, Vault and Offline First."
-            )
+    suspend fun removeBundledSampleDocuments() = withContext(Dispatchers.IO) {
+        val bundledTitles = setOf(
+            "Welcome to NOVA PDF AI",
+            "Biology - Genetics & Heritability Notes"
         )
-        val thumbWelcome = pdfRendererService.generateThumbnail(welcomeFile.absolutePath, welcomeDocId)
-        if (thumbWelcome != null) {
-            docDao.updateDocument(docDao.getDocumentById(welcomeDocId)!!.copy(thumbnailPath = thumbWelcome))
+        val docs = docDao.getAllNonVaultDocuments().firstOrNull().orEmpty()
+        docs.filter { it.title in bundledTitles }.forEach { doc ->
+            try { File(doc.filePath).delete() } catch (_: Exception) {}
+            doc.thumbnailPath?.let { path -> try { File(path).delete() } catch (_: Exception) {} }
+            flashcardDao.clearFlashcardsForDocument(doc.id)
+            studyQuizDao.clearQuizzesForDocument(doc.id)
+            bookmarkDao.getBookmarksForDocument(doc.id).firstOrNull().orEmpty().forEach { bookmarkDao.deleteBookmarkById(bookmark.id) }
+            aiChatDao.clearHistoryForDocument(doc.id)
+            docDao.deleteDocumentById(doc.id)
         }
-
-        // Add sample bookmarks for welcome doc
-        bookmarkDao.insertBookmark(BookmarkEntity(documentId = welcomeDocId, pageNumber = 1, title = "Overview & Quick Guide"))
-        bookmarkDao.insertBookmark(BookmarkEntity(documentId = welcomeDocId, pageNumber = 2, title = "Reading & Annotations"))
-        bookmarkDao.insertBookmark(BookmarkEntity(documentId = welcomeDocId, pageNumber = 3, title = "Vault & Offline First"))
-
-        // Add sample flashcards for welcome doc
-        flashcardDao.insertFlashcard(FlashcardEntity(documentId = welcomeDocId, front = "What is NOVA PDF AI's primary philosophy?", back = "Read. Understand. Create. Seamlessly combines fast offline PDF reading with deep AI document assistance and tools."))
-        flashcardDao.insertFlashcard(FlashcardEntity(documentId = welcomeDocId, front = "Do PDF reading and annotations require internet?", back = "No. Viewing, zooming, text search, bookmarks, and annotations work 100% offline."))
-
-        // 2. Generate Genetics Sample PDF
-        val geneticsFile = PdfSampleGenerator.generateGeneticsSamplePdf(context)
-        val geneticsDocId = docDao.insertDocument(
-            DocumentEntity(
-                title = "Biology - Genetics & Heritability Notes",
-                filePath = geneticsFile.absolutePath,
-                fileSize = geneticsFile.length(),
-                pageCount = 3,
-                lastPageRead = 1,
-                isFavorite = true,
-                folderName = "Academic",
-                extractedText = """
-                    Chapter 1: Principles of Heritability.
-                    Heritability is a statistic used in genetics that estimates the degree of variation in a phenotypic trait in a population that is due to genetic variation among individuals in that population.
-                    Broad-Sense Heritability (H²): H² = V_G / V_P.
-                    Narrow-Sense Heritability (h²): h² = V_A / V_P.
-                    Formulas: V_P = V_G + V_E + V_GE. Selection Response: R = h² × S (Breeder's Equation).
-                    Chapter 2: Heritability Estimates in Species.
-                    Adult Height: 0.80. Blood Pressure: 0.40. Cattle Milk Yield: 0.30. Poultry Egg Weight: 0.50. Corn Kernel Weight: 0.55.
-                    Chapter 3: Exam Revision & Practice MCQs.
-                """.trimIndent()
-            )
-        )
-        val thumbGenetics = pdfRendererService.generateThumbnail(geneticsFile.absolutePath, geneticsDocId)
-        if (thumbGenetics != null) {
-            docDao.updateDocument(docDao.getDocumentById(geneticsDocId)!!.copy(thumbnailPath = thumbGenetics))
-        }
-
-        // Add sample bookmarks for genetics doc
-        bookmarkDao.insertBookmark(BookmarkEntity(documentId = geneticsDocId, pageNumber = 1, title = "Chapter 1: Heritability Principles & Formulas"))
-        bookmarkDao.insertBookmark(BookmarkEntity(documentId = geneticsDocId, pageNumber = 2, title = "Chapter 2: Species Estimates Table"))
-        bookmarkDao.insertBookmark(BookmarkEntity(documentId = geneticsDocId, pageNumber = 3, title = "Chapter 3: Practice MCQs & Revision"))
-
-        // Add pre-seeded flashcards for genetics doc
-        flashcardDao.insertFlashcard(FlashcardEntity(documentId = geneticsDocId, front = "What is Heritability?", back = "A statistic estimating the proportion of observed phenotypic variation in a population attributable to genetic differences."))
-        flashcardDao.insertFlashcard(FlashcardEntity(documentId = geneticsDocId, front = "What is the formula for Narrow-Sense Heritability?", back = "h² = V_A / V_P (Additive genetic variance divided by total phenotypic variance)."))
-        flashcardDao.insertFlashcard(FlashcardEntity(documentId = geneticsDocId, front = "What is the Breeder's Equation?", back = "R = h² × S (Response to selection equals narrow-sense heritability times selection differential)."))
-        flashcardDao.insertFlashcard(FlashcardEntity(documentId = geneticsDocId, front = "What is the approximate heritability of human height?", back = "Approximately 0.80 (80%), indicating high genetic contribution under standard nutritional conditions."))
-
-        // Add pre-seeded study quizzes for genetics doc
-        studyQuizDao.insertQuiz(
-            StudyQuizEntity(
-                documentId = geneticsDocId,
-                question = "If phenotypic variance V_P = 100 and environmental variance V_E = 40 (with zero GxE interaction), what is broad-sense heritability H²?",
-                optionA = "0.40",
-                optionB = "0.60",
-                optionC = "0.25",
-                optionD = "0.80",
-                correctOptionIndex = 1,
-                explanation = "V_G = V_P - V_E = 100 - 40 = 60. H² = V_G / V_P = 60 / 100 = 0.60.",
-                pageReference = 1
-            )
-        )
-        studyQuizDao.insertQuiz(
-            StudyQuizEntity(
-                documentId = geneticsDocId,
-                question = "Which component of variance determines the response of a population to artificial or natural selection?",
-                optionA = "Dominance variance (V_D)",
-                optionB = "Environmental variance (V_E)",
-                optionC = "Additive genetic variance (V_A)",
-                optionD = "Epistatic interaction variance (V_I)",
-                correctOptionIndex = 2,
-                explanation = "Narrow-sense heritability h² = V_A / V_P dictates the response to selection (R = h² × S).",
-                pageReference = 1
-            )
-        )
-        studyQuizDao.insertQuiz(
-            StudyQuizEntity(
-                documentId = geneticsDocId,
-                question = "True or False: A trait with high heritability (e.g. 0.85) cannot be improved or modified by environmental changes.",
-                optionA = "True, high heritability means traits are strictly fixed",
-                optionB = "False, changing the environment (e.g. nutrition) can alter population averages",
-                optionC = "True, only gene editing can alter it",
-                optionD = "False, but only if heritability is below 0.10",
-                correctOptionIndex = 1,
-                explanation = "High heritability only measures variance in the current environment; altering environmental factors can shift average trait values significantly.",
-                pageReference = 2
-            )
-        )
-
-        // Seed initial folders
-        folderDao.insertFolder(FolderEntity(name = "Getting Started"))
-        folderDao.insertFolder(FolderEntity(name = "Academic"))
-        folderDao.insertFolder(FolderEntity(name = "Work & Research"))
     }
 
     suspend fun getDocumentById(id: Long): DocumentEntity? = docDao.getDocumentById(id)
@@ -172,7 +78,7 @@ class DocumentRepository(
             fileSize = copiedFile.length(),
             pageCount = pageCount.coerceAtLeast(1),
             lastPageRead = 1,
-            extractedText = "Imported Document: $displayName ($pageCount pages)."
+            extractedText = pdfTextExtractorService.extract(copiedFile.absolutePath).ifBlank { "Imported PDF: $displayName ($pageCount pages). No selectable text was found; this may be a scanned/image-only PDF." }
         )
         val id = docDao.insertDocument(doc)
         val thumbPath = pdfRendererService.generateThumbnail(copiedFile.absolutePath, id)
@@ -189,7 +95,7 @@ class DocumentRepository(
             fileSize = file.length(),
             pageCount = pageCount.coerceAtLeast(1),
             lastPageRead = 1,
-            extractedText = "Document $title created with NOVA PDF AI ($pageCount pages)."
+            extractedText = pdfTextExtractorService.extract(file.absolutePath).ifBlank { "Document $title created with NOVA PDF AI ($pageCount pages)." }
         )
         val id = docDao.insertDocument(doc)
         val thumbPath = pdfRendererService.generateThumbnail(file.absolutePath, id)
