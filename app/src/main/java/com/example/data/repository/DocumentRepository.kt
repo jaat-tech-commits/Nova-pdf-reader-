@@ -25,7 +25,7 @@ class DocumentRepository(
 ) {
     val pdfRendererService = PdfRendererService(context)
     val pdfToolService = PdfToolService(context)
-    val geminiService = GeminiService()
+    val geminiService = GeminiService(context)
 
     private val docDao = database.documentDao()
     private val bookmarkDao = database.bookmarkDao()
