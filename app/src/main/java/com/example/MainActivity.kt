@@ -66,6 +66,9 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            val coroutineScope = rememberCoroutineScope()
+            val navController = rememberNavController()
+
             fun navigateToMainTab(route: String) {
                 navController.navigate(route) {
                     popUpTo(navController.graph.findStartDestination().id) {
@@ -75,9 +78,6 @@ class MainActivity : ComponentActivity() {
                     restoreState = true
                 }
             }
-
-            val coroutineScope = rememberCoroutineScope()
-            val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route
 
@@ -134,16 +134,6 @@ class MainActivity : ComponentActivity() {
                                         prefs.edit().putString("gemini_api_key", key.trim()).apply()
                                         apiKeyConfigured = key.trim().isNotBlank()
                                     },
-                                    currentAiModel = selectedAiModel,
-                                    onAiModelChange = { model ->
-                                        selectedAiModel = model
-                                        prefs.edit().putString("gemini_model", model).apply()
-                                    },
-                                    apiKeyConfigured = apiKeyConfigured,
-                                    onApiKeyChange = { key ->
-                                        prefs.edit().putString("gemini_api_key", key.trim()).apply()
-                                        apiKeyConfigured = key.trim().isNotBlank()
-                                    },
                                     onFinishOnboarding = {
                                         hasCompletedOnboarding = true
                                         prefs.edit().putBoolean("onboarding_complete", true).apply()
@@ -161,7 +151,7 @@ class MainActivity : ComponentActivity() {
                                 if (isMainTabRoute) {
                                     NovaBottomNavigationBar(
                                         currentRoute = currentRoute,
-                                        onNavigate = { route -> navController.navigateToTab(route) }
+                                        onNavigate = { route -> navigateToMainTab(route) }
                                     )
                                 }
                             }
@@ -176,6 +166,16 @@ class MainActivity : ComponentActivity() {
                                     onThemeChange = { newTheme ->
                                         appThemeName = newTheme
                                         prefs.edit().putString("theme", newTheme).apply()
+                                    },
+                                    currentAiModel = selectedAiModel,
+                                    onAiModelChange = { model ->
+                                        selectedAiModel = model
+                                        prefs.edit().putString("gemini_model", model).apply()
+                                    },
+                                    apiKeyConfigured = apiKeyConfigured,
+                                    onApiKeyChange = { key ->
+                                        prefs.edit().putString("gemini_api_key", key.trim()).apply()
+                                        apiKeyConfigured = key.trim().isNotBlank()
                                     },
                                     onFinishOnboarding = {
                                         hasCompletedOnboarding = true
@@ -207,6 +207,10 @@ fun NovaNavHost(
     startDestination: String,
     appThemeName: String,
     onThemeChange: (String) -> Unit,
+    currentAiModel: String,
+    onAiModelChange: (String) -> Unit,
+    apiKeyConfigured: Boolean,
+    onApiKeyChange: (String) -> Unit,
     onFinishOnboarding: () -> Unit
 ) {
     NavHost(
@@ -284,6 +288,10 @@ fun NovaNavHost(
             SettingsScreen(
                 currentTheme = appThemeName,
                 onThemeChange = onThemeChange,
+                currentAiModel = currentAiModel,
+                onAiModelChange = onAiModelChange,
+                apiKeyConfigured = apiKeyConfigured,
+                onApiKeyChange = onApiKeyChange,
                 onNavigateToVault = { navController.navigate(NavRoutes.VAULT) }
             )
         }
