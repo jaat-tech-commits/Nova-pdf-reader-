@@ -54,6 +54,9 @@ interface DocumentDao {
 
     @Query("UPDATE documents SET title = :newTitle WHERE id = :id")
     suspend fun renameDocument(id: Long, newTitle: String)
+
+    @Query("UPDATE documents SET extractedText = :text WHERE id = :id")
+    suspend fun updateExtractedText(id: Long, text: String)
 }
 
 @Dao
