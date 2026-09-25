@@ -42,6 +42,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -115,9 +116,11 @@ fun ReaderScreen(
     val bookmarks by repository.getBookmarks(docId).collectAsState(initial = emptyList())
     val annotations by repository.getAnnotations(docId).collectAsState(initial = emptyList())
 
-    // Smart Selection Action Menu
-    var showSmartSelectionMenu by remember { mutableStateOf(false) }
-    var selectedSnippetText by remember { mutableStateOf("") }
+    // Smart text selection / OCR state
+    var showTextSelectionDialog by remember { mutableStateOf(false) }
+    var isOcrLoading by remember { mutableStateOf(false) }
+    var ocrError by remember { mutableStateOf<String?>(null) }
+    var selectionValue by remember { mutableStateOf(TextFieldValue()) }
 
     // Back handler: save reading progress on exit
     BackHandler {
@@ -491,9 +494,25 @@ fun ReaderScreen(
                                     offset = Offset.Zero
                                 },
                                 onTap = {
-                                    // Trigger smart selection on tap to simulate selecting passage
-                                    selectedSnippetText = "Heritability is a statistic used in genetics that estimates the degree of variation in a phenotypic trait in a population that is due to genetic variation among individuals."
-                                    showSmartSelectionMenu = !showSmartSelectionMenu
+                                    // Scanned PDFs have no native text layer. OCR the actual
+                                    // visible page, then let the user select the exact passage.
+                                    showTextSelectionDialog = true
+                                    isOcrLoading = true
+                                    ocrError = null
+                                    selectionValue = TextFieldValue("")
+                                    coroutineScope.launch {
+                                        val text = try {
+                                            repository.ocrPage(docId, currentPage)
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                        if (text.isNullOrBlank()) {
+                                            ocrError = "No readable text was found on this page. Try a clearer scan or use Ask AI on the page."
+                                        } else {
+                                            selectionValue = TextFieldValue(text)
+                                        }
+                                        isOcrLoading = false
+                                    }
                                 }
                             )
                         }
@@ -558,85 +577,6 @@ fun ReaderScreen(
                                 join = StrokeJoin.Round
                             )
                         )
-                    }
-                }
-            }
-
-            // Smart Selection Floating Action Menu
-            AnimatedVisibility(
-                visible = showSmartSelectionMenu && activeTool == AnnotationTool.NONE,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 70.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "\"${selectedSnippetText.take(48)}...\"",
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        ) {
-                            FilledTonalButton(onClick = {
-                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("PDF Text", selectedSnippetText))
-                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                                showSmartSelectionMenu = false
-                            }) { Text("Copy") }
-
-                            FilledTonalButton(onClick = {
-                                coroutineScope.launch {
-                                    val explanation = repository.geminiService.explainSelectedText(selectedSnippetText, "Simple")
-                                    showExplainDialog = Pair("Simple Explanation", explanation)
-                                }
-                                showSmartSelectionMenu = false
-                            }) { Text("Explain") }
-
-                            FilledTonalButton(onClick = {
-                                onNavigateToAi(docId, "Explain and summarize this selected passage: \"$selectedSnippetText\"")
-                                showSmartSelectionMenu = false
-                            }) { Text("Ask AI") }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            FilledTonalButton(onClick = {
-                                coroutineScope.launch {
-                                    val hindi = repository.geminiService.explainSelectedText(selectedSnippetText, "Hindi")
-                                    showExplainDialog = Pair("Hindi Explanation", hindi)
-                                }
-                                showSmartSelectionMenu = false
-                            }) { Text("Hindi") }
-
-                            FilledTonalButton(onClick = {
-                                coroutineScope.launch {
-                                    val hinglish = repository.geminiService.explainSelectedText(selectedSnippetText, "Hinglish")
-                                    showExplainDialog = Pair("Hinglish", hinglish)
-                                }
-                                showSmartSelectionMenu = false
-                            }) { Text("Hinglish") }
-
-                            FilledTonalButton(onClick = {
-                                coroutineScope.launch {
-                                    repository.addFlashcard(
-                                        FlashcardEntity(
-                                            documentId = docId,
-                                            front = "What is Heritability?",
-                                            back = selectedSnippetText
-                                        )
-                                    )
-                                    Toast.makeText(context, "Flashcard created!", Toast.LENGTH_SHORT).show()
-                                }
-                                showSmartSelectionMenu = false
-                            }) { Text("+ Flashcard") }
-                        }
                     }
                 }
             }
@@ -819,16 +759,27 @@ fun ReaderScreen(
     if (showSearchDialog) {
         var query by remember { mutableStateOf("") }
         var isCaseSensitive by remember { mutableStateOf(false) }
-        val sampleResults = remember(query, isCaseSensitive) {
+        val searchResults = remember(query, isCaseSensitive, document?.extractedText) {
             if (query.isBlank()) emptyList()
             else {
-                listOf(
-                    Pair(1, "Heritability is a statistic used in genetics that estimates variation..."),
-                    Pair(1, "Broad-Sense Heritability (H²): H² = V_G / V_P..."),
-                    Pair(1, "Narrow-Sense Heritability (h²): h² = V_A / V_P..."),
-                    Pair(2, "Heritability Estimates: Adult Height 0.80, Cattle Milk Yield 0.30..."),
-                    Pair(3, "Q1: If phenotypic variance V_P = 100, calculate heritability...")
-                ).filter { it.second.contains(query, ignoreCase = !isCaseSensitive) }
+                val source = document?.extractedText.orEmpty()
+                if (source.isBlank() || source.startsWith("Imported PDF:")) {
+                    emptyList()
+                } else {
+                    val pageRegex = Regex("\\[Page (\\d+)\\]")
+                    val lines = source.lines()
+                    var page = 1
+                    val results = mutableListOf<Pair<Int, String>>()
+                    for (line in lines) {
+                        val marker = pageRegex.find(line)
+                        if (marker != null) {
+                            page = marker.groupValues[1].toIntOrNull() ?: page
+                        } else if (line.contains(query, ignoreCase = !isCaseSensitive)) {
+                            results.add(page to line.trim().take(180))
+                        }
+                    }
+                    results.take(30)
+                }
             }
         }
 
@@ -855,12 +806,12 @@ fun ReaderScreen(
 
                     if (query.isNotBlank()) {
                         Text(
-                            text = "${sampleResults.size} matches found",
+                            text = "${searchResults.size} matches found",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                         LazyColumn(modifier = Modifier.height(180.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(sampleResults) { (page, snippet) ->
+                            items(searchResults) { (page, snippet) ->
                                 Card(
                                     onClick = {
                                         currentPage = page
@@ -916,6 +867,171 @@ fun ReaderScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showJumpDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Real OCR text selection dialog
+    if (showTextSelectionDialog) {
+        val start = minOf(selectionValue.selection.start, selectionValue.selection.end)
+        val end = maxOf(selectionValue.selection.start, selectionValue.selection.end)
+        val selectedText = if (start < end && end <= selectionValue.text.length) {
+            selectionValue.text.substring(start, end).trim()
+        } else {
+            ""
+        }
+
+        AlertDialog(
+            onDismissRequest = {
+                showTextSelectionDialog = false
+                isOcrLoading = false
+            },
+            title = { Text("Select text from Page $currentPage") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    when {
+                        isOcrLoading -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text("Reading this scanned page…")
+                            }
+                        }
+                        ocrError != null -> {
+                            Text(
+                                text = ocrError!!,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        else -> {
+                            Text(
+                                "Long-press and drag to select the exact passage you want.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = selectionValue,
+                                onValueChange = { selectionValue = it },
+                                readOnly = true,
+                                minLines = 8,
+                                maxLines = 14,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 220.dp, max = 420.dp)
+                            )
+                            Text(
+                                if (selectedText.isBlank()) "Select some text to enable AI actions." else "${selectedText.length} characters selected",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilledTonalButton(
+                            enabled = selectedText.isNotBlank(),
+                            onClick = {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("PDF Text", selectedText))
+                                Toast.makeText(context, "Selected text copied", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Copy") }
+
+                        FilledTonalButton(
+                            enabled = selectedText.isNotBlank(),
+                            onClick = {
+                                showTextSelectionDialog = false
+                                coroutineScope.launch {
+                                    val explanation = repository.geminiService.explainSelectedText(selectedText, "Simple")
+                                    showExplainDialog = Pair("Simple Explanation", explanation)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Explain") }
+
+                        FilledTonalButton(
+                            enabled = selectedText.isNotBlank(),
+                            onClick = {
+                                showTextSelectionDialog = false
+                                onNavigateToAi(docId, "Explain and summarize this selected passage: \"${selectedText}\"")
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Ask AI") }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilledTonalButton(
+                            enabled = selectedText.isNotBlank(),
+                            onClick = {
+                                showTextSelectionDialog = false
+                                coroutineScope.launch {
+                                    val hindi = repository.geminiService.explainSelectedText(selectedText, "Hindi")
+                                    showExplainDialog = Pair("Hindi Explanation", hindi)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Hindi") }
+
+                        FilledTonalButton(
+                            enabled = selectedText.isNotBlank(),
+                            onClick = {
+                                showTextSelectionDialog = false
+                                coroutineScope.launch {
+                                    val hinglish = repository.geminiService.explainSelectedText(selectedText, "Hinglish")
+                                    showExplainDialog = Pair("Hinglish", hinglish)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Hinglish") }
+
+                        FilledTonalButton(
+                            enabled = selectedText.isNotBlank(),
+                            onClick = {
+                                showTextSelectionDialog = false
+                                coroutineScope.launch {
+                                    val front = selectedText
+                                        .replace("\\n", " ")
+                                        .trim()
+                                        .split(Regex("(?<=[.!?])\\s+"))
+                                        .firstOrNull()
+                                        ?.take(80)
+                                        .orEmpty()
+                                        .ifBlank { "Selected passage" }
+                                    repository.addFlashcard(
+                                        FlashcardEntity(
+                                            documentId = docId,
+                                            front = front,
+                                            back = selectedText
+                                        )
+                                    )
+                                    Toast.makeText(context, "Flashcard created from selected text", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("+ Flashcard") }
+                    }
+                    TextButton(
+                        onClick = { showTextSelectionDialog = false },
+                        modifier = Modifier.align(Alignment.End)
+                    ) { Text("Close") }
+                }
             }
         )
     }
