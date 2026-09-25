@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
                         NavRoutes.HOME,
                         NavRoutes.LIBRARY,
                         NavRoutes.AI,
+                        NavRoutes.AI_WITH_DOC,
                         NavRoutes.TOOLS,
                         NavRoutes.SETTINGS
                     )
@@ -256,7 +257,7 @@ fun NovaNavHost(
         }
 
         composable(
-            route = NavRoutes.AI,
+            route = NavRoutes.AI_WITH_DOC,
             arguments = listOf(navArgument("docId") {
                 type = NavType.LongType
                 defaultValue = -1L
