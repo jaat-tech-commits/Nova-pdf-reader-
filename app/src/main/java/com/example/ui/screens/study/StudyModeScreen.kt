@@ -176,8 +176,21 @@ fun StudyModeScreen(
             when (selectedTab) {
                 StudyTab.QUIZ -> {
                     if (quizzes.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No quiz questions found for this document.")
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.padding(24.dp)
+                            ) {
+                                CircularProgressIndicator()
+                                Text(
+                                    studyGenerationMessage ?: "Generating questions from this PDF…",
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
                     } else if (isQuizCompleted) {
                         // Quiz Results Screen
