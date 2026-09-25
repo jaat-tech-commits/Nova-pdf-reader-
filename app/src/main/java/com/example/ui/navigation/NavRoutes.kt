@@ -20,7 +20,8 @@ object NavRoutes {
     // Top-level destinations
     const val HOME = "home"
     const val LIBRARY = "library"
-    const val AI = "ai?docId={docId}"
+    const val AI = "ai"
+    const val AI_WITH_DOC = "ai?docId={docId}"
     const val TOOLS = "tools"
     const val SETTINGS = "settings"
 
