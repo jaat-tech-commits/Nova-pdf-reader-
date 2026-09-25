@@ -230,7 +230,7 @@ fun NovaNavHost(
                 },
                 onNavigateToLibrary = { navController.navigate(NavRoutes.LIBRARY) },
                 onNavigateToAi = { docId ->
-                    navController.navigate(NavRoutes.aiRoute(docId))
+                    navController.navigate(docId?.let { NavRoutes.aiRoute(it) } ?: NavRoutes.AI)
                 },
                 onNavigateToScanner = { navController.navigate(NavRoutes.SCANNER) },
                 onNavigateToTools = { navController.navigate(NavRoutes.TOOLS) },
