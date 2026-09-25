@@ -52,6 +52,41 @@ fun StudyModeScreen(
 
     val quizzes by repository.getStudyQuizzes(docId).collectAsState(initial = emptyList())
     val flashcards by repository.getFlashcards(docId).collectAsState(initial = emptyList())
+    val document by repository.getDocumentByIdFlow(docId).collectAsState(initial = null)
+    var studyGenerationMessage by remember { mutableStateOf<String?>(null) }
+    var examNotes by remember { mutableStateOf("") }
+    var formulas by remember { mutableStateOf("") }
+    var sectionLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(docId) {
+        studyGenerationMessage = repository.generateStudyPackIfNeeded(docId)
+    }
+
+    LaunchedEffect(docId, selectedTab, document?.id) {
+        val doc = document ?: return@LaunchedEffect
+        val source = doc.extractedText.orEmpty()
+        if (source.length < 80 || source.startsWith("Imported PDF:")) return@LaunchedEffect
+
+        if (selectedTab == StudyTab.EXAM_NOTES && examNotes.isBlank()) {
+            sectionLoading = true
+            examNotes = repository.geminiService.askDocument(
+                question = "Create high-yield exam revision notes ONLY from this PDF. Use clear headings, bullet points, definitions, important facts, and [Page N] citations. Do not add information that is not in the PDF.",
+                documentTitle = doc.title,
+                documentText = source
+            )
+            sectionLoading = false
+        }
+
+        if (selectedTab == StudyTab.FORMULAS && formulas.isBlank()) {
+            sectionLoading = true
+            formulas = repository.geminiService.askDocument(
+                question = "Extract ONLY formulas, equations, numerical relationships, units, and calculation rules that actually appear in this PDF. If there are no formulas, clearly say so. Include [Page N] citations. Do not use formulas from other documents.",
+                documentTitle = doc.title,
+                documentText = source
+            )
+            sectionLoading = false
+        }
+    }
 
     // Quiz state
     var currentQuizIndex by remember { mutableIntStateOf(0) }
