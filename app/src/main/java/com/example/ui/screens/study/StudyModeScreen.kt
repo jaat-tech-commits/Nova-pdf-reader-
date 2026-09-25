@@ -631,6 +631,55 @@ fun FlashcardView(
 }
 
 @Composable
+fun DynamicStudyTextView(
+    title: String,
+    content: String,
+    loading: Boolean,
+    emptyMessage: String
+) {
+    if (loading || content.isBlank()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            if (loading) CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                if (loading) "Generating $title from your PDF…" else emptyMessage,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(24.dp)
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Text(
+                    content,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun ExamNotesView() {
     LazyColumn(
         modifier = Modifier
