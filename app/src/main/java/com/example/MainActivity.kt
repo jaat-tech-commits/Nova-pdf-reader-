@@ -345,7 +345,12 @@ fun NovaNavHost(
                 docId = docId,
                 repository = repository,
                 onBack = { navController.popBackStack() },
-                onHome = { navigateToHome(navController) },
+                onHome = {
+                    navController.popBackStack(NavRoutes.HOME, false)
+                    if (navController.currentDestination?.route != NavRoutes.HOME) {
+                        navController.navigate(NavRoutes.HOME) { launchSingleTop = true }
+                    }
+                },
                 onOpenPageReference = { targetDocId, page ->
                     navController.navigate(NavRoutes.readerRoute(targetDocId, page))
                 }
