@@ -153,7 +153,7 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("NOVA PDF AI", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text(""Read. Understand. Create."", style = MaterialTheme.typography.bodySmall)
+                        Text("\"Read. Understand. Create.\"", style = MaterialTheme.typography.bodySmall)
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             "Gemini-powered PDF chat and summaries, document navigation, study tools, annotations, voice input and private storage.",
