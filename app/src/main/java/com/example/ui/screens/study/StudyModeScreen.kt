@@ -59,7 +59,13 @@ fun StudyModeScreen(
     var sectionLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(docId) {
-        studyGenerationMessage = repository.generateStudyPackIfNeeded(docId)
+        studyGenerationMessage = "Reading this PDF and preparing its study content…"
+        val ocrReady = repository.ensureOcrTextIfNeeded(docId)
+        studyGenerationMessage = if (ocrReady) {
+            repository.generateStudyPackIfNeeded(docId)
+        } else {
+            "This PDF could not be read. Try a clearer scan and regenerate."
+        }
     }
 
     LaunchedEffect(docId, selectedTab, document?.id) {
