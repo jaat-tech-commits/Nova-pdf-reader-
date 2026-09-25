@@ -20,7 +20,7 @@ object NavRoutes {
     // Top-level destinations
     const val HOME = "home"
     const val LIBRARY = "library"
-    const val AI = "ai"
+    const val AI = "ai?docId={docId}"
     const val TOOLS = "tools"
     const val SETTINGS = "settings"
 
@@ -33,6 +33,7 @@ object NavRoutes {
 
     // Route builders with type safety
     fun readerRoute(docId: Long, page: Int = 1): String = "reader/$docId?page=$page"
+    fun aiRoute(docId: Long): String = "ai?docId=$docId"
     fun studyRoute(docId: Long): String = "study/$docId"
 }
 
