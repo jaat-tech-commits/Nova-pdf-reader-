@@ -25,7 +25,6 @@ import com.example.data.service.TtsService
 import com.example.ui.navigation.NavRoutes
 import com.example.ui.navigation.NovaBottomNavigationBar
 import com.example.ui.navigation.NovaNavigationRail
-import com.example.ui.navigation.navigateToTab
 import com.example.ui.screens.ai.AiChatScreen
 import com.example.ui.screens.home.HomeScreen
 import com.example.ui.screens.library.LibraryScreen
@@ -59,6 +58,23 @@ class MainActivity : ComponentActivity() {
             val prefs = remember { context.getSharedPreferences("nova_pdf_prefs", Context.MODE_PRIVATE) }
             var appThemeName by remember { mutableStateOf(prefs.getString("theme", "System") ?: "System") }
             var hasCompletedOnboarding by remember { mutableStateOf(prefs.getBoolean("onboarding_complete", false)) }
+            var selectedAiModel by remember { mutableStateOf(prefs.getString("gemini_model", "gemini-3.8-flash") ?: "gemini-3.8-flash") }
+            var apiKeyConfigured by remember {
+                mutableStateOf(
+                    prefs.getString("gemini_api_key", "").orEmpty().isNotBlank() ||
+                        try { BuildConfig.GEMINI_API_KEY.isNotBlank() && BuildConfig.GEMINI_API_KEY != "MY_GEMINI_API_KEY" } catch (_: Exception) { false }
+                )
+            }
+
+            fun navigateToMainTab(route: String) {
+                navController.navigate(route) {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
 
             val coroutineScope = rememberCoroutineScope()
             val navController = rememberNavController()
@@ -94,7 +110,7 @@ class MainActivity : ComponentActivity() {
                         Row(modifier = Modifier.fillMaxSize()) {
                             NovaNavigationRail(
                                 currentRoute = currentRoute,
-                                onNavigate = { route -> navController.navigateToTab(route) }
+                                onNavigate = { route -> navigateToMainTab(route) }
                             )
 
                             Box(modifier = Modifier.weight(1f)) {
@@ -107,6 +123,26 @@ class MainActivity : ComponentActivity() {
                                     onThemeChange = { newTheme ->
                                         appThemeName = newTheme
                                         prefs.edit().putString("theme", newTheme).apply()
+                                    },
+                                    currentAiModel = selectedAiModel,
+                                    onAiModelChange = { model ->
+                                        selectedAiModel = model
+                                        prefs.edit().putString("gemini_model", model).apply()
+                                    },
+                                    apiKeyConfigured = apiKeyConfigured,
+                                    onApiKeyChange = { key ->
+                                        prefs.edit().putString("gemini_api_key", key.trim()).apply()
+                                        apiKeyConfigured = key.trim().isNotBlank()
+                                    },
+                                    currentAiModel = selectedAiModel,
+                                    onAiModelChange = { model ->
+                                        selectedAiModel = model
+                                        prefs.edit().putString("gemini_model", model).apply()
+                                    },
+                                    apiKeyConfigured = apiKeyConfigured,
+                                    onApiKeyChange = { key ->
+                                        prefs.edit().putString("gemini_api_key", key.trim()).apply()
+                                        apiKeyConfigured = key.trim().isNotBlank()
                                     },
                                     onFinishOnboarding = {
                                         hasCompletedOnboarding = true
@@ -189,7 +225,7 @@ fun NovaNavHost(
                 },
                 onNavigateToLibrary = { navController.navigate(NavRoutes.LIBRARY) },
                 onNavigateToAi = { docId ->
-                    navController.navigate(NavRoutes.AI)
+                    navController.navigate(NavRoutes.aiRoute(docId))
                 },
                 onNavigateToScanner = { navController.navigate(NavRoutes.SCANNER) },
                 onNavigateToTools = { navController.navigate(NavRoutes.TOOLS) },
@@ -210,14 +246,21 @@ fun NovaNavHost(
                     navController.navigate(NavRoutes.studyRoute(docId))
                 },
                 onNavigateToAi = { docId ->
-                    navController.navigate(NavRoutes.AI)
+                    navController.navigate(NavRoutes.aiRoute(docId))
                 }
             )
         }
 
-        composable(NavRoutes.AI) {
+        composable(
+            route = NavRoutes.AI,
+            arguments = listOf(navArgument("docId") {
+                type = NavType.LongType
+                defaultValue = -1L
+            })
+        ) { backStackEntry ->
+            val aiDocId = backStackEntry.arguments?.getLong("docId")?.takeIf { it > 0L }
             AiChatScreen(
-                initialDocId = null,
+                initialDocId = aiDocId,
                 initialPrompt = null,
                 repository = repository,
                 onBack = null,
@@ -264,7 +307,7 @@ fun NovaNavHost(
                 ttsService = ttsService,
                 onBack = { navController.popBackStack() },
                 onNavigateToAi = { targetDocId, prompt ->
-                    navController.navigate(NavRoutes.AI)
+                    navController.navigate(NavRoutes.aiRoute(targetDocId))
                 },
                 onNavigateToStudy = { targetDocId ->
                     navController.navigate(NavRoutes.studyRoute(targetDocId))
