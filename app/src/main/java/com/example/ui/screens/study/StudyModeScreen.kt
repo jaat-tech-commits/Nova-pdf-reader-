@@ -43,6 +43,7 @@ fun StudyModeScreen(
     docId: Long,
     repository: DocumentRepository,
     onBack: () -> Unit,
+    onHome: () -> Unit,
     onOpenPageReference: (Long, Int) -> Unit
 ) {
     val context = LocalContext.current
@@ -73,6 +74,9 @@ fun StudyModeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onHome) {
+                        Icon(Icons.Default.Home, contentDescription = "Home")
+                    }
                     IconButton(onClick = {
                         coroutineScope.launch {
                             // Add extra generated question
