@@ -59,7 +59,7 @@ class DocumentRepository(
             doc.thumbnailPath?.let { path -> try { File(path).delete() } catch (_: Exception) {} }
             flashcardDao.clearFlashcardsForDocument(doc.id)
             studyQuizDao.clearQuizzesForDocument(doc.id)
-            bookmarkDao.getBookmarksForDocument(doc.id).firstOrNull().orEmpty().forEach { bookmarkDao.deleteBookmarkById(bookmark.id) }
+            bookmarkDao.getBookmarksForDocument(doc.id).firstOrNull().orEmpty().forEach { bookmark -> bookmarkDao.deleteBookmarkById(bookmark.id) }
             aiChatDao.clearHistoryForDocument(doc.id)
             docDao.deleteDocumentById(doc.id)
         }
@@ -280,7 +280,7 @@ class DocumentRepository(
         if (raw.startsWith("Gemini ")) return@withContext raw
 
         try {
-            val clean = raw.replaceAll(String.fromCharCode(96), "").trim()
+            val clean = raw.replace('\u0060', ' ').trim()
             val root = org.json.JSONObject(clean)
 
             if (existingQuizzes.isEmpty()) {
