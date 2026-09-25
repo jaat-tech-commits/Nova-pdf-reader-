@@ -273,11 +273,21 @@ fun StudyModeScreen(
                 }
 
                 StudyTab.EXAM_NOTES -> {
-                    ExamNotesView()
+                    DynamicStudyTextView(
+                        title = "Exam Notes",
+                        content = examNotes,
+                        loading = sectionLoading,
+                        emptyMessage = "Add a Gemini API key in Settings to generate exam notes from this PDF."
+                    )
                 }
 
                 StudyTab.FORMULAS -> {
-                    FormulasView()
+                    DynamicStudyTextView(
+                        title = "Formulas & Equations",
+                        content = formulas,
+                        loading = sectionLoading,
+                        emptyMessage = "No formulas have been extracted yet, or Gemini is not configured."
+                    )
                 }
             }
         }
