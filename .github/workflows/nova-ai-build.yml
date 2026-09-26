@@ -26,11 +26,13 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "::error::Missing repository secret GEMINI_API_KEY"
-            exit 1
+          if [ -n "$GEMINI_API_KEY" ]; then
+            printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" > .env
+            echo "Built-in Gemini API key configured."
+          else
+            cp .env.example .env
+            echo "::warning::GEMINI_API_KEY is not configured; building a functional APK without live Gemini AI."
           fi
-          printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" > .env
 
       - name: Build debug APK
         run: chmod +x ./gradlew && ./gradlew --no-daemon assembleDebug
