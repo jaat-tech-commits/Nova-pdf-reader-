@@ -1,4 +1,5 @@
 name: Build NOVA PDF AI APK
+# Stable runner configuration
 
 on:
   workflow_dispatch:
