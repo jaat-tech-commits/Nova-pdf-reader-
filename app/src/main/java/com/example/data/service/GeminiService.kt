@@ -18,32 +18,83 @@ import java.util.concurrent.TimeUnit
 
 class GeminiService(private val context: Context) {
 
+    companion object {
+        private const val MODEL = "gemini-3.8-flash"
+        private const val MAX_DOCUMENT_CHARS = 12000
+    }
+
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val prefs by lazy { context.getSharedPreferences("nova_pdf_prefs", Context.MODE_PRIVATE) }
 
-    // Current stable Gemini model; the user can change this from Settings.
-    private val modelName: String
-        get() = prefs.getString("gemini_model", "gemini-3.8-flash") ?: "gemini-3.8-flash"
-
-    private fun getApiKey(): String {
-        val saved = prefs.getString("gemini_api_key", "").orEmpty().trim()
-        if (saved.isNotBlank()) return saved
-
-        return try {
-            BuildConfig.GEMINI_API_KEY.trim()
-        } catch (_: Exception) {
-            ""
-        }
+    private fun getApiKey(): String = try {
+        BuildConfig.GEMINI_API_KEY.trim()
+    } catch (_: Exception) {
+        ""
     }
 
     private fun geminiNotConfigured(): String =
-        "Gemini AI is not configured. Open Settings → NOVA AI Engine → Gemini API Key, enter your Google AI Studio API key, then try again."
+        "NOVA AI is not available in this build. The app needs its built-in Gemini service configuration."
+
+    private fun extractText(responseBody: String): String {
+        val parsed = JSONObject(responseBody)
+        return parsed.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")
+            ?.optJSONArray("parts")?.let { parts ->
+                buildString {
+                    for (i in 0 until parts.length()) append(parts.optJSONObject(i)?.optString("text").orEmpty())
+                }
+            }?.trim().orEmpty()
+    }
+
+    private suspend fun generate(requestJson: JSONObject, apiKey: String, maxOutputTokens: Int = 1200): String =
+        withContext(Dispatchers.IO) {
+            if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") return@withContext geminiNotConfigured()
+            val payload = JSONObject(requestJson.toString()).apply {
+                if (!has("generationConfig")) put("generationConfig", JSONObject())
+                val config = getJSONObject("generationConfig")
+                config.put("maxOutputTokens", maxOutputTokens)
+                config.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
+            }
+            for (attempt in 0..1) {
+                try {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$apiKey"
+                    val request = Request.Builder().url(url).header("Accept", "application/json")
+                        .post(payload.toString().toRequestBody(jsonMediaType)).build()
+                    client.newCall(request).execute().use { response ->
+                        val body = response.body?.string().orEmpty()
+                        if (response.isSuccessful) {
+                            val answer = extractText(body)
+                            if (answer.isNotBlank()) return@withContext answer
+                        } else {
+                            val retryable = response.code == 429 || response.code == 500 || response.code == 503 || response.code == 504
+                            if (!retryable || attempt == 1) return@withContext when (response.code) {
+                                401, 403 -> "NOVA AI authentication failed. The built-in Gemini service configuration is invalid."
+                                404 -> "NOVA AI model is unavailable. Please rebuild with the current NOVA AI configuration."
+                                429 -> "NOVA AI is temporarily rate-limited. Please try again in a moment."
+                                else -> "NOVA AI request failed (${response.code}). Please try again."
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    if (attempt == 1) return@withContext "NOVA AI connection error. Please check the internet connection and try again."
+                }
+                delay(450L)
+            }
+            "NOVA AI request failed. Please try again."
+        }
+
+    private fun textRequest(prompt: String): JSONObject = JSONObject().apply {
+        put("contents", JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "user")
+                put("parts", JSONArray().apply { put(JSONObject().put("text", prompt)) })
+            })
+        })
+    }
 
     suspend fun askDocument(
         question: String,
@@ -77,7 +128,7 @@ class GeminiService(private val context: Context) {
             // System instruction or initial context turn
             val contextText = """
                 [DOCUMENT CONTENT]:
-                ${documentText.take(15000)}
+                ${documentText.take(MAX_DOCUMENT_CHARS)}
             """.trimIndent()
 
             val initialTurn = JSONObject().apply {
@@ -253,7 +304,7 @@ class GeminiService(private val context: Context) {
                 })
             }
 
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$apiKey"
             val request = Request.Builder()
                 .url(url)
                 .post(requestJson.toString().toRequestBody(jsonMediaType))
@@ -396,133 +447,4 @@ class GeminiService(private val context: Context) {
         return askDocument(prompt, documentTitle, documentText)
     }
 
-    private fun generateOfflineAnswer(
-        question: String,
-        documentTitle: String,
-        documentText: String,
-        pageContext: Int?
-    ): String {
-        val qLower = question.lowercase()
-
-        // Check if question is about heritability / biology
-        if (qLower.contains("heritability") || qLower.contains("genetic") || qLower.contains("trait")) {
-            return """
-                ### Heritability Overview [Page 1]
-                
-                **Heritability** is a genetic statistic measuring the proportion of phenotypic variation in a population attributable to genetic variation.
-                
-                - **Broad-Sense Heritability (H²)**: Proportional total genetic variance across all gene effects:
-                  `H² = V_G / V_P` [Page 1]
-                - **Narrow-Sense Heritability (h²)**: Additive genetic variance governing response to natural and artificial selection:
-                  `h² = V_A / V_P` [Page 1]
-                
-                **Key Formulas:**
-                - `V_P = V_G + V_E + V_GE` [Page 1]
-                - `Breeder's Equation: R = h² × S` [Page 1]
-                
-                **Trait Estimates Table [Page 2]:**
-                - Adult Height (Humans): `h² = 0.80` (High genetic influence)
-                - Blood Pressure: `h² = 0.40`
-                - Cattle Milk Yield: `h² = 0.30`
-                
-                *Tap [Page 1] or [Page 2] to view original source notes.*
-            """.trimIndent()
-        }
-
-        if (qLower.contains("formula") || qLower.contains("equation")) {
-            return """
-                ### Key Formulas Found in "$documentTitle"
-                
-                1. **Phenotypic Variance Decomposition** [Page 1]
-                   `V_P = V_G + V_E + V_GE`
-                
-                2. **Broad-Sense Heritability** [Page 1]
-                   `H² = V_G / V_P`
-                
-                3. **Narrow-Sense Heritability** [Page 1]
-                   `h² = V_A / V_P`
-                
-                4. **Breeder's Equation (Response to Selection)** [Page 1]
-                   `R = h² × S`
-                
-                *Tap any [Page 1] tag to jump to the formula in the reader.*
-            """.trimIndent()
-        }
-
-        if (qLower.contains("summary") || qLower.contains("summarize") || qLower.contains("main idea")) {
-            return """
-                ### Executive Summary: "$documentTitle" [Page 1]
-                
-                - **Primary Focus**: Document provides structured foundational principles, core equations, empirical traits, and review questions.
-                - **Key Findings**: Trait variance is systematically separated into genetic, environmental, and interactive components.
-                - **Practical Application**: Quantitative formulas allow prediction of trait selection in agriculture and medicine [Page 2].
-                
-                *Tap [Page 1] to navigate to the introduction.*
-            """.trimIndent()
-        }
-
-        // Generic intelligent match from document text
-        val matchingLines = documentText.lines().filter { line ->
-            val words = question.split(" ").filter { it.length > 3 }
-            words.any { line.contains(it, ignoreCase = true) }
-        }.take(4)
-
-        if (matchingLines.isNotEmpty()) {
-            val pageRef = pageContext ?: 1
-            return """
-                ### Direct Findings from Document [Page $pageRef]
-                
-                ${matchingLines.joinToString("\n\n") { "• $it" }}
-                
-                According to "$documentTitle", the document emphasizes these core concepts.
-                
-                *(Connect Gemini API Key in Settings to enable deep generative reasoning)*
-            """.trimIndent()
-        }
-
-        return """
-            ### Information from "$documentTitle" [Page ${pageContext ?: 1}]
-            
-            This document covers foundational topics, chapters, and reference tables.
-            
-            **Relevant Excerpt:**
-            "${documentText.take(280)}..."
-            
-            *Tip: Tap [Page 1] to jump to the start of this section.*
-        """.trimIndent()
-    }
-
-    private fun getOfflineExplanation(text: String, style: String): String {
-        return when (style) {
-            "Simple" -> """
-                **Simple Explanation:**
-                "$text"
-                
-                In simple words: This describes how characteristics and variations pass down through hereditary factors rather than external environmental causes alone.
-            """.trimIndent()
-            "Hindi" -> """
-                **सरल हिंदी व्याख्या:**
-                "$text"
-                
-                इसका अर्थ यह है कि किसी जनसंख्या में देखे जाने वाले लक्षणों का अंतर आनुवंशिक कारणों से निर्धारित होता है, न कि केवल वातावरण से।
-            """.trimIndent()
-            "Hinglish" -> """
-                **Hinglish Explanation:**
-                "$text"
-                
-                Basically iska matlab yeh hai ki kisi population me jo differences dikhte hain, unka kitna hissa genetics ki wajah se hai aur kitna environment ki wajah se.
-            """.trimIndent()
-            "Example" -> """
-                **Real-World Examples:**
-                1. *Human Height*: Approximately 80% of human height variance in well-nourished populations is explained by genetic factors.
-                2. *Agricultural Crops*: Plant breeders select high-yield parent crops based on narrow-sense heritability estimates.
-            """.trimIndent()
-            else -> """
-                **Detailed Analysis:**
-                "$text"
-                
-                This passage articulates quantitative trait variation, emphasizing the proportion of observable phenotypic variance governed by underlying genetic variance.
-            """.trimIndent()
-        }
-    }
 }
