@@ -101,157 +101,34 @@ class GeminiService(private val context: Context) {
         documentTitle: String,
         documentText: String,
         pageContext: Int? = null,
-        history: List<Pair<String, String>> = emptyList() // List of (role, text)
-    ): String = withContext(Dispatchers.IO) {
-        val apiKey = getApiKey()
-        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext geminiNotConfigured()
+        history: List<Pair<String, String>> = emptyList()
+    ): String {
+        val document = documentText.take(MAX_DOCUMENT_CHARS)
+        val historyText = history.takeLast(4).joinToString("\n") { (role, text) ->
+            "$role: ${text.take(1500)}"
         }
+        val prompt = """
+            You are NOVA PDF AI, a precise document-reading assistant.
+            Document: "$documentTitle"
+            ${pageContext?.let { "Current page: $it" } ?: ""}
 
-        val systemPrompt = """
-            You are NOVA PDF AI, an expert, objective document reading assistant.
-            Document Title: "$documentTitle"
-            ${pageContext?.let { "The user is currently reading Page $it." } ?: ""}
-            
-            RULES:
-            1. Answer using the provided document text whenever possible.
-            2. If you find the answer in the document, ALWAYS cite the page number in brackets like [Page X], e.g. "Heritability measures genetic variation [Page 1]".
-            3. If the answer cannot be found in the document, state: "I couldn't find this information in the document." then provide helpful general knowledge clearly marked as such.
-            4. Keep explanations clear, structured, and easy to read.
-            5. Support Hindi or Hinglish when requested by the user.
-            6. Accurately preserve formulas, equations, and tables.
+            Rules:
+            - Answer from the supplied document whenever possible.
+            - Never invent document facts or sample/demo content.
+            - Cite supplied [Page N] markers when available.
+            - If the answer is not in the document, say so clearly.
+            - Be concise and fast. Support Hindi and Hinglish naturally.
+
+            DOCUMENT:
+            $document
+
+            RECENT CHAT:
+            ${historyText.ifBlank { "(none)" }}
+
+            USER QUESTION:
+            $question
         """.trimIndent()
-
-        try {
-            val contentsArray = JSONArray()
-
-            // System instruction or initial context turn
-            val contextText = """
-                [DOCUMENT CONTENT]:
-                ${documentText.take(MAX_DOCUMENT_CHARS)}
-            """.trimIndent()
-
-            val initialTurn = JSONObject().apply {
-                put("role", "user")
-                put("parts", JSONArray().apply {
-                    put(JSONObject().apply { put("text", "$contextText\n\nPlease acknowledge receipt of this document.") })
-                })
-            }
-            contentsArray.put(initialTurn)
-
-            val initialAck = JSONObject().apply {
-                put("role", "model")
-                put("parts", JSONArray().apply {
-                    put(JSONObject().apply { put("text", "I have received the document \"$documentTitle\". How can I help you understand or study it?") })
-                })
-            }
-            contentsArray.put(initialAck)
-
-            // Add previous chat turns
-            for ((role, text) in history.takeLast(6)) {
-                val turn = JSONObject().apply {
-                    put("role", if (role == "user") "user" else "model")
-                    put("parts", JSONArray().apply {
-                        put(JSONObject().apply { put("text", text) })
-                    })
-                }
-                contentsArray.put(turn)
-            }
-
-            // Current prompt
-            val currentTurn = JSONObject().apply {
-                put("role", "user")
-                put("parts", JSONArray().apply {
-                    put(JSONObject().apply { put("text", question) })
-                })
-            }
-            contentsArray.put(currentTurn)
-
-            val requestJson = JSONObject().apply {
-                put("contents", contentsArray)
-                put("systemInstruction", JSONObject().apply {
-                    put("parts", JSONArray().apply {
-                        put(JSONObject().apply { put("text", systemPrompt) })
-                    })
-                })
-                put("generationConfig", JSONObject().apply {
-                    put("temperature", 0.3)
-                    put("maxOutputTokens", 2048)
-                })
-            }
-
-            // Gemini can temporarily return 503 when a model is overloaded. Retry with
-            // exponential backoff, then automatically cascade through stable Flash models.
-            // A 401/403/400/404 is not retried because those indicate configuration/request
-            // problems rather than transient service availability.
-            val fallbackModels = listOf(
-                modelName,
-                "gemini-3.7-flash",
-                "gemini-3.6-flash",
-                "gemini-3.5-flash-lite"
-            ).distinct()
-
-            var lastErrorCode = 0
-            var lastErrorMessage = ""
-
-            for ((modelIndex, model) in fallbackModels.withIndex()) {
-                val maxAttempts = if (modelIndex == 0) 3 else 2
-
-                for (attempt in 1..maxAttempts) {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(requestJson.toString().toRequestBody(jsonMediaType))
-                        .build()
-
-                    val response = client.newCall(request).execute()
-                    val responseBody = response.body?.string().orEmpty()
-
-                    if (response.isSuccessful) {
-                        val parsed = JSONObject(responseBody)
-                        val candidates = parsed.optJSONArray("candidates")
-                        val candidate = candidates?.optJSONObject(0)
-                        val parts = candidate?.optJSONObject("content")?.optJSONArray("parts")
-                        val answer = parts?.optJSONObject(0)?.optString("text").orEmpty()
-
-                        if (answer.isNotBlank()) {
-                            return@withContext answer
-                        }
-
-                        lastErrorCode = 200
-                        lastErrorMessage = "Gemini returned an empty response."
-                        break
-                    }
-
-                    lastErrorCode = response.code
-                    lastErrorMessage = responseBody
-
-                    // Only transient service/rate-limit/server errors are retried.
-                    val retryable = response.code == 429 || response.code == 500 ||
-                        response.code == 503 || response.code == 504
-
-                    if (!retryable) {
-                        return@withContext "Gemini request failed (${response.code}). Please check the API key, selected model, and Gemini API access."
-                    }
-
-                    if (attempt < maxAttempts) {
-                        // 1s, then 2s; small jitter avoids synchronized retries.
-                        val backoffMs = 1000L shl (attempt - 1)
-                        val jitterMs = kotlin.random.Random.nextLong(0L, 350L)
-                        delay(backoffMs + jitterMs)
-                    }
-                }
-            }
-
-            return@withContext when (lastErrorCode) {
-                429 -> "Gemini is temporarily rate-limited. Please wait a moment and try again."
-                503 -> "Gemini is temporarily unavailable. NOVA tried multiple Flash models automatically; please try again shortly."
-                500, 504 -> "Gemini is temporarily having server issues. NOVA retried automatically; please try again shortly."
-                else -> "Gemini request failed ($lastErrorCode). ${lastErrorMessage.ifBlank { "Please try again." }}"
-            }
-        } catch (e: Exception) {
-            "Gemini connection error: ${e.message ?: "unknown error"}. Check your internet connection and API key."
-        }
+        return generate(textRequest(prompt), getApiKey(), 1400)
     }
 
     suspend fun summarize(
