@@ -207,7 +207,7 @@ class GeminiService(private val context: Context) {
         val prompt = "Translate the following text faithfully and accurately into $targetLanguage. Output ONLY the translated text:\n\n\"$text\""
 
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext "[$targetLanguage Translation]:\n$text"
+            return@withContext geminiNotConfigured()
         }
 
         try {
@@ -220,7 +220,7 @@ class GeminiService(private val context: Context) {
                     })
                 })
             }
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$apiKey"
             val request = Request.Builder()
                 .url(url)
                 .post(requestJson.toString().toRequestBody(jsonMediaType))
@@ -232,7 +232,7 @@ class GeminiService(private val context: Context) {
                 ?.optJSONObject("content")?.optJSONArray("parts")
                 ?.optJSONObject(0)?.optString("text")?.trim() ?: text
         } catch (e: Exception) {
-            "[$targetLanguage Translation]:\n$text"
+            "NOVA AI translation failed. Please try again."
         }
     }
 
@@ -242,7 +242,7 @@ class GeminiService(private val context: Context) {
     ): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext "OCR Analysis: Document image processed. (Connect Gemini API Key in Settings for full multimodal OCR and handwriting transcription)."
+            return@withContext geminiNotConfigured()
         }
 
         try {
@@ -278,7 +278,7 @@ class GeminiService(private val context: Context) {
                 ?.optJSONObject("content")?.optJSONArray("parts")
                 ?.optJSONObject(0)?.optString("text") ?: "OCR processing completed."
         } catch (e: Exception) {
-            "OCR Analysis: Scanned document page captured."
+            "NOVA AI OCR failed. Please try again."
         }
     }
 
