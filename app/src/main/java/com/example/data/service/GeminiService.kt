@@ -266,7 +266,7 @@ class GeminiService(private val context: Context) {
                 })
             }
 
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent?key=$apiKey"
             val request = Request.Builder()
                 .url(url)
                 .post(requestJson.toString().toRequestBody(jsonMediaType))
