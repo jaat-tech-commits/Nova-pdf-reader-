@@ -1,0 +1,22 @@
+#!/bin/sh
+
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
+if [ -n "$JAVA_HOME" ]; then
+  JAVA_CMD="$JAVA_HOME/bin/java"
+else
+  JAVA_CMD="java"
+fi
+
+if [ ! -x "$JAVA_CMD" ]; then
+  echo "ERROR: JAVA_HOME is not set correctly." >&2
+  exit 1
+fi
+
+if [ ! -f "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" ]; then
+  echo "Gradle wrapper bootstrap: use Gradle 8.10 to generate gradle-wrapper.jar first." >&2
+  echo "For GitHub Actions, the workflow performs this bootstrap automatically." >&2
+  exit 1
+fi
+
+exec "$JAVA_CMD" -classpath "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain "$@"
