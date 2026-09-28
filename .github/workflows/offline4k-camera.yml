@@ -2,15 +2,9 @@ name: Build Offline 4K Camera APK
 
 on:
   push:
-    branches: ["camera-app-v1"]
+    branches:
+      - camera-app-v1
   workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: offline4k-camera-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -24,14 +18,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
-      - name: Set up Gradle 8.10
+      - name: Install Gradle 8.10
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10"
+          cache-disabled: true
 
-      - name: Generate wrapper
+      - name: Generate Gradle wrapper
         working-directory: offline4k-camera
         run: gradle --no-daemon wrapper --gradle-version 8.10 --distribution-type bin
 
