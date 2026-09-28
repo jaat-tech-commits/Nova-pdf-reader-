@@ -1,0 +1,44 @@
+name: Build Offline 4K Camera APK
+
+on:
+  push:
+    branches: ["camera-app-v1"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline4k-camera-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Bootstrap Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+          cache-read-only: false
+      - name: Generate Gradle wrapper
+        run: gradle --no-daemon wrapper --gradle-version 8.10 --distribution-type bin
+      - name: Verify Gradle wrapper
+        run: ./gradlew --version
+      - name: Build debug APK
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Offline4KCamera-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
